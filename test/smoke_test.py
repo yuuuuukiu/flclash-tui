@@ -59,11 +59,15 @@ rules:
   - MATCH,🚀 节点选择
 """
 
+# 内核路径：优先用程序内置内核（留空让 TUI 自动释放），
+# 也可用环境变量 FLT_CORE_PATH 指定外部二进制。
+CORE_PATH = os.environ.get("FLT_CORE_PATH", "")
+
 os.makedirs(f"{HOME}/profiles", exist_ok=True)
 os.makedirs(f"{HOME}/core", exist_ok=True)
 with open(f"{HOME}/settings.json", "w") as f:
     json.dump({
-        "coreMode": "managed", "corePath": "/tmp/mihomo",
+        "coreMode": "managed", "corePath": CORE_PATH,
         "controllerAddr": "127.0.0.1:19090", "secret": "testsecret123",
         "mixedPort": 17890, "mode": "rule", "logLevel": "info",
     }, f)
@@ -80,6 +84,20 @@ with open(f"{HOME}/profiles.json", "w") as f:
 # 第二个订阅：本地 HTTP 服务（带 subscription-userinfo 头）
 with open("/tmp/flt-sub2.yaml", "w") as f:
     f.write(SUB_YAML.replace("香港01", "东京01"))
+
+
+# 本地「目标网站」：用来产生真实代理流量，避免依赖公网（CI 里也能跑）
+class TargetHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"ok" * 512
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
 
 
 class SubHandler(http.server.BaseHTTPRequestHandler):
@@ -103,6 +121,9 @@ class SubHandler(http.server.BaseHTTPRequestHandler):
 http.server.HTTPServer.allow_reuse_address = True
 httpd = http.server.HTTPServer(("127.0.0.1", 18080), SubHandler)
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
+targetd = http.server.HTTPServer(("127.0.0.1", 18081), TargetHandler)
+threading.Thread(target=targetd.serve_forever, daemon=True).start()
+TARGET_URL = "http://127.0.0.1:18081/data"
 
 
 # ---------- pty 驱动 ----------
@@ -235,10 +256,11 @@ check("订阅流量信息解析", scr, "10.0 GB", fatal=True)
 JSON1 = ('{"proxies":[{"name":"JP-01","type":"ss","server":"192.0.2.99","port":8388,'
          '"cipher":"aes-128-gcm","password":"x"}],'
          '"rules":["DOMAIN-SUFFIX,example.net,JP-01","MATCH,JP-01"]}')
+# 第 5 条规则让本地目标服务器走 DIRECT，这样「产生真实流量」的断言不依赖公网
 JSON2 = ('{"proxies":[{"name":"JP-01","type":"ss","server":"192.0.2.99","port":8388,'
          '"cipher":"aes-128-gcm","password":"x"}],'
          '"rules":["DOMAIN-SUFFIX,example.net,JP-01","DOMAIN-SUFFIX,example.org,DIRECT",'
-         '"DOMAIN-KEYWORD,baidu,DIRECT","MATCH,JP-01"]}')
+         '"DOMAIN-KEYWORD,baidu,DIRECT","IP-CIDR,127.0.0.1/32,DIRECT","MATCH,JP-01"]}')
 
 scr = tui.send("n", wait=0.6)
 check("手写配置弹窗", scr, "手写配置", "配置名称", fatal=True)
@@ -309,7 +331,7 @@ scr = tui.send("3", wait=0.5)
 # 4) 连接页（产生真实流量）
 traffic = subprocess.Popen(
     ["curl", "-x", "http://127.0.0.1:17890", "-s", "-o", "/dev/null",
-     "--max-time", "20", "http://www.baidu.com"],
+     "--max-time", "20", TARGET_URL],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 scr = tui.send("4", wait=2.5)
 check("连接页", scr, "连接 (", fatal=True)
@@ -319,9 +341,9 @@ if not ok:
     tui.close()
     sys.exit(1)
 
-# 5) 规则页（当前激活的是手写配置：2 条 DomainSuffix + DomainKeyword + Match）
+# 5) 规则页（当前激活的是手写配置：2 条 DomainSuffix + DomainKeyword + IPCIDR + Match）
 scr = tui.send("5", wait=1.5)
-check("规则页", scr, "规则 (4)", "DomainSuffix", "example.org", fatal=True)
+check("规则页", scr, "规则 (5)", "DomainSuffix", "example.org", fatal=True)
 
 # 6) 日志页
 scr = tui.send("6", wait=1.0)
@@ -329,7 +351,11 @@ check("日志页", scr, "日志", fatal=True)
 
 # 7) 设置页
 scr = tui.send("7", wait=1.0)
-check("设置页", scr, "mihomo 内核路径", "/tmp/mihomo", "混合端口", "17890", fatal=True)
+check("设置页", scr, "mihomo 内核路径", "混合端口", "17890", fatal=True)
+if CORE_PATH:
+    check("设置页显示外部内核路径", scr, CORE_PATH, fatal=True)
+else:
+    check("设置页显示内置内核释放路径", scr, "/core/bin/mihomo", fatal=True)
 
 # 7.1) 编辑混合端口 17890 -> 17990：光标移到 混合端口(第5项)
 for _ in range(4):
@@ -353,7 +379,7 @@ scr = tui.send("R", wait=5.0)
 time.sleep(2)
 tui.read(1)
 r = subprocess.run(["curl", "-x", "http://127.0.0.1:17990", "-s", "-o", "/dev/null",
-                    "-w", "%{http_code}", "--max-time", "10", "http://www.baidu.com"],
+                    "-w", "%{http_code}", "--max-time", "10", TARGET_URL],
                    capture_output=True, text=True)
 if r.stdout.strip() == "200":
     print("✅ 应用重启后新端口(17990)可代理")
@@ -419,6 +445,7 @@ tui.send("Q", wait=1.5)
 tui.close()
 traffic.terminate()
 httpd.shutdown()
+targetd.shutdown()
 
 time.sleep(1)
 r = subprocess.run(["pgrep", "-f", "mihomo -d " + HOME], capture_output=True)

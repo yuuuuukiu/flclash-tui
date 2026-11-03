@@ -91,6 +91,18 @@ python3 internal/coreasset/gen.py    # 重新下载/重新生成内置内核资�
 未打包的平台（如 freebsd）会编译成 `coreasset.Available() == false`，此时回退到 PATH 里的
 mihomo，也可在设置页/`settings set corePath` 手动指定。
 
+### 发布
+
+推送 `v*` 形式的 tag 会自动跑测试、交叉编译 8 个平台并创建 GitHub Release
+（`.github/workflows/release.yml`）：
+
+```bash
+git tag v1.20.0 && git push origin v1.20.0
+```
+
+Release 里每个产物都自带目标平台的内核，另附 `checksums.txt`。工作流还会校验
+产物 >15MB 且 `go list -f '{{.EmbedFiles}}'` 确实指向本平台的资产，避免发出没带内核的包。
+
 ## 快速开始
 
 ```bash
@@ -238,19 +250,22 @@ flclash-tui --home /tmp/sandbox core stop
 ## 测试
 
 ```bash
-# TUI 端到端冒烟测试（pty 驱动 + 真实内核，隔离数据目录与端口）
+# 单元测试（含内置内核释放/校验/损坏修复）
+go test ./...
+
+# TUI 端到端冒烟测试（pty 驱动 + 内置内核，隔离数据目录与端口）
 python3 test/smoke_test.py
 
 # 非交互式 CLI 全链路测试（不依赖 TUI，覆盖全部子命令）
 python3 test/cli_test.py
 ```
 
-`smoke_test.py`（42 项）：内核拉起/退出清理、七个页面渲染、组测速与节点切换、订阅添加（含
+`smoke_test.py`（42 项，完全不依赖公网：目标站点也是本地起的）：内核拉起/退出清理、七个页面渲染、组测速与节点切换、订阅添加（含
 `subscription-userinfo`/`filename*` 解析）、手写配置（JSON 粘贴→规范化落盘→激活→规则生效→
 编辑源→保存重载→取消）、订阅拉取双通道回退、事件通知栈堆叠与开关、设置编辑→持久化→应用重启→
 新端口代理验证、模式切换、帮助浮层。
 
-`cli_test.py`（80 项）：内置内核释放与校验、`core` 全部子命令与后台 pid 生命周期、订阅
+`cli_test.py`（81 项）：内置内核释放与校验、`core` 全部子命令与后台 pid 生命周期、订阅
 增/删/改/查/更新/激活/重命名、JSON 规范化、$EDITOR 集成（保存 / 取消 / 非法内容 / 非 tty）、
 `proxy`/`conn`/`rule`/`config`/`log`/`settings`/`sysproxy` 的读写与 `--json` 输出、退出码约定。
 

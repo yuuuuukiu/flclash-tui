@@ -1,0 +1,160 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag，如 v1.20.0（留空则只构建不发布）"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # 先在一台机器上把测试跑通，避免把坏版本发出去
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 单元测试
+        run: go test ./...
+
+      - name: vet
+        run: go vet ./...
+
+      - name: 格式化检查
+        run: |
+          out=$(gofmt -l . || true)
+          if [ -n "$out" ]; then
+            echo "以下文件未格式化："
+            echo "$out"
+            exit 1
+          fi
+
+      - name: 构建并跑端到端测试
+        run: |
+          go build -trimpath -ldflags "-s -w" -o flclash-tui .
+          python3 test/cli_test.py
+          python3 test/smoke_test.py
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: darwin,  goarch: arm64, goarm: "",  name: darwin-arm64 }
+          - { goos: darwin,  goarch: amd64, goarm: "",  name: darwin-amd64 }
+          - { goos: linux,   goarch: amd64, goarm: "",  name: linux-amd64 }
+          - { goos: linux,   goarch: arm64, goarm: "",  name: linux-arm64 }
+          - { goos: linux,   goarch: arm,   goarm: "7", name: linux-armv7 }
+          - { goos: linux,   goarch: 386,   goarm: "",  name: linux-386 }
+          - { goos: windows, goarch: amd64, goarm: "",  name: windows-amd64 }
+          - { goos: windows, goarch: arm64, goarm: "",  name: windows-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: 构建 ${{ matrix.name }}
+        id: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: "0"
+        run: |
+          ext=""
+          [ "$GOOS" = "windows" ] && ext=".exe"
+          out="flclash-tui-${GOOS}-${GOARCH}${GOARM:+v$GOARM}${ext}"
+          echo "out=$out" >> "$GITHUB_OUTPUT"
+          go build -trimpath -ldflags "-s -w" -o "$out" .
+          ls -l "$out"
+
+      - name: 确认内核已打进产物
+        env:
+          BIN: ${{ steps.build.outputs.out }}
+        run: |
+          size=$(stat -c%s "$BIN")
+          echo "$BIN = $size bytes"
+          # 内置内核 gzip 后约 10MB，打完包后一定 > 15MB
+          if [ "$size" -lt 15000000 ]; then
+            echo "产物过小，内置内核可能没打进去"
+            exit 1
+          fi
+
+      - name: 确认打进去的是本平台的内核资产
+        run: |
+          embedded=$(GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            GOARM=${{ matrix.goarm }} go list -f '{{join .EmbedFiles ","}}' ./internal/coreasset/)
+          echo "embedded = ${embedded:-<空>}"
+          if [ -z "$embedded" ]; then
+            echo "该平台没有 embed 内核资产（走了 fallback）"
+            exit 1
+          fi
+          case "$embedded" in
+            *mihomo-${{ matrix.goos }}-*) ;;
+            *)
+              echo "embed 的资产与目标平台不符: $embedded"
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flclash-tui-${{ matrix.name }}
+          path: ${{ steps.build.outputs.out }}
+          retention-days: 7
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 生成校验和
+        run: |
+          cd dist
+          ls -lh
+          # 用 sha256sum（ubuntu）生成，找不到就回退 shasum
+          if command -v sha256sum >/dev/null; then
+            sha256sum flclash-tui-* > checksums.txt
+          else
+            shasum -a 256 flclash-tui-* > checksums.txt
+          fi
+          cat checksums.txt
+
+      - name: 发布
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          NOTES=$'- mihomo 内核已内置，下载即用，无需另外安装内核\n- 校验：`sha256sum -c checksums.txt`'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            # --generate-notes 与 --notes 互斥，不能同时给
+            gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --notes "$NOTES"
+          fi

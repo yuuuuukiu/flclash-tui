@@ -44,6 +44,14 @@ def run(*args, stdin=None, timeout=120, expect=0):
     return p
 
 
+def script_cmd(cmd):
+    """用 script(1) 给命令套一个伪终端（macOS 与 Linux 的参数形式不同）。"""
+    if sys.platform == "darwin":
+        return ["script", "-q", "/dev/null", "sh", "-c", cmd]
+    # util-linux: script -q -e -c "<cmd>" /dev/null
+    return ["script", "-q", "-e", "-c", cmd, "/dev/null"]
+
+
 def runj(*args, **kw):
     p = run(*args, *(["--json"] if True else []), **kw)
     try:
@@ -323,14 +331,18 @@ def main():
     ok("profile show --raw 只输出内容", p.stdout.lstrip().startswith("proxies:"), p.stdout[:80])
 
     # ---------- 11) profile edit（$EDITOR 集成） ----------
+    # 用 python 改文件而不是 sed -i，避开 BSD(-i '') 与 GNU(-i) 的参数差异
     editor = os.path.join(tempfile.mkdtemp(), "ed.sh")
     with open(editor, "w") as f:
-        f.write("#!/bin/bash\nsed -i '' 's/MATCH,JSON节点/MATCH,DIRECT/' \"$1\"\n")
+        f.write(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "p = sys.argv[1]\n"
+            "s = open(p, encoding='utf-8').read()\n"
+            "open(p, 'w', encoding='utf-8').write(s.replace('MATCH,JSON节点', 'MATCH,DIRECT'))\n"
+        )
     os.chmod(editor, 0o755)
-    env = dict(os.environ, EDITOR=editor, FLCLASH_TUI_HOME=HOME)
-    # 需要 tty：用 script(1) 提供伪终端
-    cmd = f"EDITOR={editor} {BIN} --home {HOME} profile edit {pid2}"
-    p = subprocess.run(["script", "-q", "/dev/null", "sh", "-c", cmd],
+    p = subprocess.run(script_cmd(f"EDITOR={editor} {BIN} --home {HOME} profile edit {pid2}"),
                        capture_output=True, text=True, timeout=90)
     ok("profile edit 拉起编辑器并保存", "已保存" in p.stdout, (p.stdout[:300], p.stderr[:200]))
     d, _ = runj("rule", "list")
@@ -342,8 +354,7 @@ def main():
     with open(abort_ed, "w") as f:
         f.write("#!/bin/bash\nexit 1\n")
     os.chmod(abort_ed, 0o755)
-    cmd = f"EDITOR={abort_ed} {BIN} --home {HOME} profile edit {pid2}"
-    p = subprocess.run(["script", "-q", "/dev/null", "sh", "-c", cmd],
+    p = subprocess.run(script_cmd(f"EDITOR={abort_ed} {BIN} --home {HOME} profile edit {pid2}"),
                        capture_output=True, text=True, timeout=90)
     ok("编辑器非零退出视为取消", "已取消" in p.stdout, p.stdout[:300])
 
@@ -352,8 +363,7 @@ def main():
     with open(bad_ed, "w") as f:
         f.write("#!/bin/bash\necho 'not: [valid' > \"$1\"\n")
     os.chmod(bad_ed, 0o755)
-    cmd = f"EDITOR={bad_ed} {BIN} --home {HOME} profile edit {pid2}"
-    p = subprocess.run(["script", "-q", "/dev/null", "sh", "-c", cmd],
+    p = subprocess.run(script_cmd(f"EDITOR={bad_ed} {BIN} --home {HOME} profile edit {pid2}"),
                        capture_output=True, text=True, timeout=90)
     ok("编辑器保存非法内容被拒（退出码 1）", p.returncode == 1 and "rejected" in p.stdout,
        (p.returncode, p.stdout[:300]))
@@ -386,6 +396,15 @@ def main():
     time.sleep(1.5)
     d, _ = runj("config", "show")
     ok("应用后内核端口已变", d["config"]["mixed-port"] == new_port, d["config"]["mixed-port"])
+
+    # ---------- 12.5) sysproxy（仅 macOS 支持） ----------
+    p = run("sysproxy", "status", expect=None, timeout=30)
+    if sys.platform == "darwin":
+        ok("sysproxy status（macOS）", p.returncode == 0 and "系统代理" in p.stdout,
+           (p.returncode, p.stdout[:200], p.stderr[:200]))
+    else:
+        ok("sysproxy status（非 macOS 报告不支持）", p.returncode == 1 and "不支持" in p.stdout,
+           (p.returncode, p.stdout[:200]))
 
     # ---------- 13) 退出清理 ----------
     p = run("core", "stop", expect=0)
