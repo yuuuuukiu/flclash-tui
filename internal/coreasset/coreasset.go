@@ -27,6 +27,18 @@ import (
 // Version 是打包进二进制内的 mihomo 版本（与 assets.lock.json 保持一致）。
 const Version = "v1.19.13"
 
+// BuildHint 是没内置内核时给用户的提示。
+const BuildHint = "本机构建未包含内置内核，请先运行 python3 internal/coreasset/gen.py（或 make build）后重新编译"
+
+// 下面三个由生成的 asset_<os>_<arch>.go 在 init() 里填充。
+// 留默认值是为了在「资产还没生成」时也能编译通过并优雅降级（Available() == false），
+// 而不是抛出一堆 undefined: compressed 之类的构建错误。
+var (
+	compressed       []byte
+	embeddedSum      string
+	decompressedSize int64
+)
+
 // ErrUnavailable 表示当前构建平台没有内置内核。
 var ErrUnavailable = errors.New("当前平台未内置 mihomo 内核")
 

@@ -14,18 +14,19 @@ core-assets:
 core-verify:
 	python3 internal/coreasset/gen.py --verify
 
-build:
+## build 依赖 core-assets：干净克隆下也能一条命令跑通
+build: core-assets
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) .
 
 ## 单元测试（已生成的平台会额外验证释放/校验/自愈）
-test:
+test: core-assets
 	go test ./...
 
 ## 两套端到端测试
-test-tui:
+test-tui: build
 	python3 test/smoke_test.py
 
-test-cli:
+test-cli: build
 	python3 test/cli_test.py
 
 test-all: test build test-cli test-tui

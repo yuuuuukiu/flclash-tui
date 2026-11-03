@@ -4,10 +4,5 @@
 
 package coreasset
 
-// 当前平台没有打包内核：compressed 为 nil，Available() 返回 false，
-// 调用方回退到 PATH 里的 mihomo。
-var compressed []byte
-
-const embeddedSum = ""
-
-const decompressedSize = 0
+// 当前平台没有打包内核（如 freebsd）：默认值已在 coreasset.go 里，
+// Available() 返回 false，调用方回退到 PATH 里的 mihomo。

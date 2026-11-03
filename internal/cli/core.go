@@ -378,7 +378,9 @@ func corePath(c *Ctx, argv []string) int {
 		if info.Available {
 			c.say("内置内核: 是（%s）", info.Version)
 		} else {
-			c.say("内置内核: 否（请把 mihomo 放到 PATH 或在设置里指定路径）")
+			c.say("内置内核: 否")
+			c.say("  %s", coreasset.BuildHint)
+			c.say("  或把 mihomo 放到 PATH / 用 settings set corePath 指定")
 		}
 		c.say("释放路径: %s", paths.CoreBinFile())
 		if p, ok := res["inUse"].(string); ok && p != "" {
