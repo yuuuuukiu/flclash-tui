@@ -1,100 +1,108 @@
 #!/usr/bin/env python3
-"""把 mihomo 内核二进制打包成 internal/coreasset 下的 go:embed 资产。
+"""按 assets.lock.json 拉取 mihomo 内核并生成 go:embed 资产。
+
+内核二进制不进 git 仓库（每个约 11MB，8 个平台约 85MB，每次升级都会在 git 历史里再留一份）。
+本脚本在**构建期**下载、校验并生成：
+
+    internal/coreasset/assets/mihomo-<os>-<arch>.gz   被 go:embed 的字节流
+    internal/coreasset/asset_<os>_<arch>.go           生成出来的 embed 声明
 
 用法:
-    python3 internal/coreasset/gen.py                 # 下载缺失的平台并生成
-    python3 internal/coreasset/gen.py --only linux/amd64
-    python3 internal/coreasset/gen.py --cache /tmp/coreassets
+    python3 internal/coreasset/gen.py            # 下载缺失的、校验已有的、重新生成 .go
+    python3 internal/coreasset/gen.py --clean    # 删掉 assets/ 与生成的 .go
+    python3 internal/coreasset/gen.py --verify   # 只校验（CI 用），不写盘
 
-依赖: curl、gzip（Windows 资产额外需要 unzip）。生成的文件请一并提交到仓库。
+校验两级（锚点都是上游原始文件的哈希，不依赖重新压缩后的字节）：
+    1. 上游原始包（.gz/.zip）→ lock 里的 upstreamSha256
+    2. 解压/解包后的内核 → lock 里的 binSha256（防止上游换成错误架构的包）
+
+上游只有 windows 提供 zip，其余是 .gz。zip 里的 exe 会被重新压成 .gz 供 go:embed
+使用——这层压缩不比字节，因为 gzip 输出受实现细节影响；内核内容本身由 binSha256 锁定。
 """
 import argparse
 import gzip
 import hashlib
+import json
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 
-VERSION = "v1.19.13"
-BASE = f"https://github.com/MetaCubeX/mihomo/releases/download/{VERSION}"
-
 HERE = os.path.dirname(os.path.abspath(__file__))
+LOCK = os.path.join(HERE, "assets.lock.json")
 ASSETS = os.path.join(HERE, "assets")
 
-# (goos, goarch, goarm, 上游资产名, build tag)
-TARGETS = [
-    ("darwin",  "arm64", "",  f"mihomo-darwin-arm64-{VERSION}.gz",  "darwin && arm64"),
-    ("darwin",  "amd64", "",  f"mihomo-darwin-amd64-{VERSION}.gz",  "darwin && amd64"),
-    ("linux",   "amd64", "",  f"mihomo-linux-amd64-{VERSION}.gz",   "linux && amd64"),
-    ("linux",   "arm64", "",  f"mihomo-linux-arm64-{VERSION}.gz",   "linux && arm64"),
-    ("linux",   "386",   "",  f"mihomo-linux-386-{VERSION}.gz",     "linux && 386"),
-    ("linux",   "arm",   "7", f"mihomo-linux-armv7-{VERSION}.gz",   "linux && arm && arm.7"),
-    ("windows", "amd64", "",  f"mihomo-windows-amd64-{VERSION}.zip", "windows && amd64"),
-    ("windows", "arm64", "",  f"mihomo-windows-arm64-{VERSION}.zip", "windows && arm64"),
-]
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
 
-def asset_name(goos, goarch, goarm):
-    suffix = f"arm{goarm}" if goarch == "arm" and goarm else goarch
-    return f"mihomo-{goos}-{suffix}.gz"
+def load_lock():
+    with open(LOCK, encoding="utf-8") as f:
+        return json.load(f)
 
 
-def download(url, dest):
+def download(url: str, dest: str) -> None:
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         return
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
     print(f"  下载 {url}")
-    subprocess.run(["curl", "-fL", "--retry", "3", "-o", dest, url], check=True)
+    subprocess.run(
+        ["curl", "-fL", "--retry", "3", "--retry-delay", "2", "-o", dest, url],
+        check=True,
+    )
 
 
-def prepare(cache, goos, goarch, goarm, upstream):
-    """返回压缩后的 .gz 资产路径（Windows 的 zip 会就地转成 gz）。"""
-    os.makedirs(cache, exist_ok=True)
-    raw = os.path.join(cache, upstream)
-    download(f"{BASE}/{upstream}", raw)
-    out = os.path.join(ASSETS, asset_name(goos, goarch, goarm))
-    if raw.endswith(".gz"):
-        shutil.copyfile(raw, out)
-        return out
-    # zip（Windows）：解出 exe 再 gzip -9
+def extract_binary(cache_path: str) -> bytes:
+    """从上游资产里取出内核二进制本身。"""
+    if cache_path.endswith(".gz"):
+        return gzip.decompress(open(cache_path, "rb").read())
+    # windows zip：解出 exe
     with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["unzip", "-o", "-q", raw, "-d", tmp], check=True)
-        exes = [f for f in os.listdir(tmp) if f.endswith(".exe")]
+        subprocess.run(["unzip", "-o", "-q", cache_path, "-d", tmp], check=True)
+        exes = [f for f in os.listdir(tmp) if f.lower().endswith(".exe")]
         if not exes:
-            sys.exit(f"{raw} 里没有 .exe")
-        with open(os.path.join(tmp, exes[0]), "rb") as src, \
-                gzip.open(out, "wb", compresslevel=9) as dst:
-            shutil.copyfileobj(src, dst)
-    return out
+            raise SystemExit(f"{cache_path} 里没有 .exe")
+        return open(os.path.join(tmp, exes[0]), "rb").read()
 
 
-def write_go_file(goos, goarch, goarm, asset, tag):
-    asset = os.path.basename(asset)
-    with gzip.open(os.path.join(ASSETS, asset), "rb") as f:
-        raw = f.read()
-    digest = hashlib.sha256(raw).hexdigest()
-    name = f"asset_{goos}_{goarch}" + (f"_{goarm}" if goarm else "") + ".go"
-    with open(os.path.join(HERE, name), "w") as f:
+def pack_gz(binary: bytes) -> bytes:
+    """把内核压成 gzip（供 go:embed）。产物不必逐字节可复现，内容由 binSha256 锁定。"""
+    buf = tempfile.SpooledTemporaryFile()
+    with gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=9, mtime=0) as gz:
+        gz.write(binary)
+    buf.seek(0)
+    return buf.read()
+
+
+def go_file_name(t) -> str:
+    return f"asset_{t['goos']}_{t['goarch']}" + (f"_{t['goarm']}" if t["goarm"] else "") + ".go"
+
+
+def write_go_file(t, lock_version: str) -> None:
+    path = os.path.join(HERE, go_file_name(t))
+    with open(path, "w") as f:
         f.write(f"""// Code generated by internal/coreasset/gen.py. DO NOT EDIT.
 
-//go:build {tag}
+//go:build {t['buildTag']}
 
 package coreasset
 
 import _ "embed"
 
-//go:embed assets/{asset}
+//go:embed assets/{t['asset']}
 var compressed []byte
 
-const embeddedSum = "{digest}"
+// embeddedSum 是解压后内核的 sha256（运行时据此校验释放结果）
+const embeddedSum = "{t['binSha256']}"
 
-const decompressedSize = {len(raw)}
+const decompressedSize = {t['binSize']}
 """)
-    return len(raw), digest
 
 
-def write_fallback(conds):
+def write_fallback(lock) -> None:
+    conds = [t["buildTag"] for t in lock["targets"]]
     expr = "!(" + " || ".join(f"({c})" for c in conds) + ")"
     with open(os.path.join(HERE, "asset_unsupported.go"), "w") as f:
         f.write(f"""// Code generated by internal/coreasset/gen.py. DO NOT EDIT.
@@ -113,27 +121,92 @@ const decompressedSize = 0
 """)
 
 
-def main():
+def clean(lock) -> None:
+    for t in lock["targets"]:
+        for p in (os.path.join(ASSETS, t["asset"]), os.path.join(HERE, go_file_name(t))):
+            if os.path.exists(p):
+                os.remove(p)
+                print(f"  删除 {os.path.relpath(p, HERE)}")
+    fb = os.path.join(HERE, "asset_unsupported.go")
+    if os.path.exists(fb):
+        os.remove(fb)
+        print("  删除 asset_unsupported.go")
+    if os.path.isdir(ASSETS) and not os.listdir(ASSETS):
+        os.rmdir(ASSETS)
+
+
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--cache", default=os.path.join(tempfile.gettempdir(), "coreassets"),
-                    help="上游压缩包缓存目录")
+                    help="上游压缩包缓存目录（默认 $TMPDIR/coreassets）")
     ap.add_argument("--only", action="append", default=None,
                     help="只处理指定平台，如 --only linux/amd64")
+    ap.add_argument("--verify", action="store_true", help="只校验不写盘（CI 用）")
+    ap.add_argument("--clean", action="store_true", help="删除已生成的资产")
     args = ap.parse_args()
 
+    lock = load_lock()
+    if args.clean:
+        clean(lock)
+        return 0
+
     os.makedirs(ASSETS, exist_ok=True)
-    conds = []
-    for goos, goarch, goarm, upstream, tag in TARGETS:
-        conds.append(tag)
-        if args.only and f"{goos}/{goarch}" not in args.only:
+    failed = 0
+    for t in lock["targets"]:
+        label = f"{t['goos']}/{t['goarch']}{'v' + t['goarm'] if t['goarm'] else ''}"
+        if args.only and f"{t['goos']}/{t['goarch']}" not in args.only:
             continue
-        print(f"[{goos}/{goarch}{'v' + goarm if goarm else ''}]")
-        asset = prepare(args.cache, goos, goarch, goarm, upstream)
-        size, digest = write_go_file(goos, goarch, goarm, asset, tag)
-        print(f"  {size / 1e6:.1f} MB 解压后  sha256={digest[:16]}…")
-    write_fallback(conds)
-    print("完成。记得把 assets/ 与 asset_*.go 一起提交。")
+
+        target = os.path.join(ASSETS, t["asset"])
+        # 已存在且内核内容校验通过就跳过下载，避免重复拉取
+        if os.path.exists(target):
+            try:
+                got = sha256(gzip.decompress(open(target, "rb").read()))
+            except (OSError, EOFError):
+                got = ""
+            if got == t["binSha256"]:
+                if not args.verify:
+                    write_go_file(t, lock["version"])
+                print(f"[{label}] 已有且校验一致")
+                continue
+            print(f"[{label}] 已有文件校验不符，重新获取")
+            os.remove(target)
+
+        if args.verify:
+            print(f"[{label}] 缺少资产：{os.path.relpath(target, HERE)}")
+            failed += 1
+            continue
+
+        cache_path = os.path.join(args.cache, t["upstream"])
+        download(f"{lock['source']}/{t['upstream']}", cache_path)
+
+        got_up = sha256(open(cache_path, "rb").read())
+        if got_up != t["upstreamSha256"]:
+            print(f"[{label}] ❌ 上游包 sha256 不符\n  期望 {t['upstreamSha256']}\n  实际 {got_up}")
+            failed += 1
+            continue
+
+        binary = extract_binary(cache_path)
+        got_bin = sha256(binary)
+        if got_bin != t["binSha256"]:
+            print(f"[{label}] ❌ 内核 sha256 不符\n  期望 {t['binSha256']}\n  实际 {got_bin}")
+            failed += 1
+            continue
+
+        with open(target, "wb") as f:
+            f.write(pack_gz(binary))
+        write_go_file(t, lock["version"])
+        print(f"[{label}] ✅ {t['binSize'] / 1e6:.1f}MB 内核 → {t['asset']}")
+
+    if not args.verify:
+        write_fallback(lock)
+
+    if failed:
+        print(f"\n{failed} 个目标失败")
+        return 1
+    print("\n完成。")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

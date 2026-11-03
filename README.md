@@ -65,31 +65,55 @@ FLClash TUI (v1.19.13)   1仪表盘  2代理  3订阅  4连接  5规则  6日志
 - **FLClash 同款配置管线**：订阅原始 YAML + 应用设置 → 强制 patch（端口/TUN `dns-hijack any:53` + `auto-route`、DNS 基线 fake-ip + DoH、`store-selected: false`、关闭多余 controller 形态）→ 写入内核工作目录。
 - 选择状态由 TUI 自行持久化（不依赖内核 cache），切换订阅/重启不丢失。
 - 全局快捷键、鼠标滚轮、事件通知、确认弹窗、帮助浮层（`?`）。
-- **内置 mihomo 内核**：二进制里直接打包了 8 个平台的 mihomo（darwin/arm64+amd64、linux/amd64+arm64+armv7+386、windows/amd64+arm64），首次运行自动释放到数据目录并校验 sha256，不需要单独下载内核。
+- **内置 mihomo 内核**：二进制里直接打包了 8 个平台的 mihomo（darwin/arm64+amd64、linux/amd64+arm64+armv7+386、windows/amd64+arm64），首次运行自动释放到数据目录并校验 sha256，不需要单独下载内核。内核资产不进 git 仓库，构建时按 `assets.lock.json` 拉取并校验。
 - **全功能非交互式 CLI**：所有 TUI 能力都有对应子命令（见下），统一 `--json` 输出与退出码，可直接写进脚本 / CI / cron。
 
 ## 安装 / 构建
 
-需要 Go 1.22+：
+需要 Go 1.22+ 与 Python 3（拉取内核资产用）：
 
 ```bash
-# 当前平台（含内置内核，单文件即可运行）
+git clone https://github.com/yuuuuukiu/flclash-tui && cd flclash-tui
+make build        # = 拉取内核资产 + 编译
+./flclash-tui
+```
+
+或者不用 make：
+
+```bash
+python3 internal/coreasset/gen.py    # 先拉取内核资产（必需，否则编译会缺 assets/）
 go build -trimpath -ldflags "-s -w" -o flclash-tui .
-
-# 交叉编译（每个平台的产物都自带该平台的 mihomo）
-GOOS=linux GOARCH=amd64 go build -o flclash-tui-linux-amd64 .
-GOOS=windows GOARCH=amd64 go build -o flclash-tui.exe .
 ```
 
-**内核已内置**：仓库里 `internal/coreasset/assets/` 存了各平台 mihomo（gzip），通过 `go:embed`
-打进可执行文件。首次运行会释放到 `core/bin/mihomo`，用内置 sha256 校验，已存在且一致就跳过。
+**内核已内置，但不进仓库**：每个平台的 mihomo 约 11MB，8 个平台共 85MB；如果提交到
+git，每次升级内核都会在历史里再留一份。所以改为**构建期拉取**：
+
+- `internal/coreasset/assets.lock.json` 提交到仓库，用 sha256 钉死每个平台的上游包与内核二进制
+- `python3 internal/coreasset/gen.py` 按 lock 下载并校验，生成 `assets/*.gz` 与 `asset_<os>_<arch>.go`
+- 目录已被 `.gitignore` 忽略；上游包缓存在 `$TMPDIR/coreassets`，重复构建不重复下载
+
+这两级校验都是围着**上游原始文件**和**解压后的内核**做的，不依赖重新压缩后的字节：
 
 ```bash
-python3 internal/coreasset/gen.py    # 重新下载/重新生成内置内核资产（可选）
+python3 internal/coreasset/gen.py --verify   # 只校验（CI 用）
+python3 internal/coreasset/gen.py --clean    # 清掉生成的资产
 ```
+
+首次运行会把内核释放到 `core/bin/mihomo`，用内置 `embeddedSum` 校验，已存在且一致就跳过；
+文件被损坏或版本不符时会自动重新释放。
 
 未打包的平台（如 freebsd）会编译成 `coreasset.Available() == false`，此时回退到 PATH 里的
 mihomo，也可在设置页/`settings set corePath` 手动指定。
+
+### 常用 make 目标
+
+```bash
+make build          # 拉资产 + 编译
+make test           # go test
+make test-all       # 单测 + 两套 e2e
+make release-local  # 交叉编译 8 个平台到 dist/
+make clean          # 清掉产物与内核资产
+```
 
 ### 发布
 
@@ -100,8 +124,18 @@ mihomo，也可在设置页/`settings set corePath` 手动指定。
 git tag v1.20.0 && git push origin v1.20.0
 ```
 
-Release 里每个产物都自带目标平台的内核，另附 `checksums.txt`。工作流还会校验
-产物 >15MB 且 `go list -f '{{.EmbedFiles}}'` 确实指向本平台的资产，避免发出没带内核的包。
+Release 里每个产物都自带目标平台的内核，另附 `checksums.txt`。工作流会缓存内核上游包，
+并校验产物 >15MB 且 `go list -f '{{.EmbedFiles}}'` 确实指向本平台的资产，避免发出没带内核的包。
+
+### 升级内核版本
+
+```bash
+# 1. 改 lock 里所有 version/upstream/source，以及 internal/coreasset/coreasset.go 的 Version
+# 2. 重新算哈希并重建资产
+python3 internal/coreasset/gen.py --clean
+python3 internal/coreasset/gen.py
+make test-all
+```
 
 ## 快速开始
 

@@ -24,6 +24,19 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # 内核资产不随仓库分发，按 assets.lock.json 拉取（上游包按 sha256 缓存）
+      - name: 缓存内核上游包
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/coreassets
+          key: mihomo-core-${{ hashFiles('internal/coreasset/assets.lock.json') }}
+
+      - name: 拉取并校验内置内核资产
+        run: python3 internal/coreasset/gen.py --cache "${{ runner.temp }}/coreassets"
+
+      - name: 校验资产与 lock 一致
+        run: python3 internal/coreasset/gen.py --verify --cache "${{ runner.temp }}/coreassets"
+
       - name: 单元测试
         run: go test ./...
 
@@ -67,6 +80,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: 缓存内核上游包
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/coreassets
+          key: mihomo-core-${{ hashFiles('internal/coreasset/assets.lock.json') }}
+
+      - name: 拉取并校验内置内核资产
+        run: python3 internal/coreasset/gen.py --cache "${{ runner.temp }}/coreassets"
 
       - name: 构建 ${{ matrix.name }}
         id: build

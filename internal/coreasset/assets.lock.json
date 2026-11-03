@@ -1,0 +1,102 @@
+{
+  "version": "v1.19.13",
+  "source": "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.13",
+  "targets": [
+    {
+      "goos": "darwin",
+      "goarch": "arm64",
+      "goarm": "",
+      "asset": "mihomo-darwin-arm64.gz",
+      "upstream": "mihomo-darwin-arm64-v1.19.13.gz",
+      "upstreamSha256": "d4f55b33c2eb91e8e771a3877d1d1b3825e4c1516af17291400c6447ca118e4a",
+      "upstreamSize": 10571223,
+      "binSha256": "27ebdf4513256b619d0f5a0adf64eb1f53adf8a489428ac66a10bc54b4601cc5",
+      "binSize": 28883922,
+      "buildTag": "darwin && arm64"
+    },
+    {
+      "goos": "darwin",
+      "goarch": "amd64",
+      "goarm": "",
+      "asset": "mihomo-darwin-amd64.gz",
+      "upstream": "mihomo-darwin-amd64-v1.19.13.gz",
+      "upstreamSha256": "f42f7470a250ad0ed46fe3aed6ca49be20a49d7458c831ac22a0c1d1239de660",
+      "upstreamSize": 11382089,
+      "binSha256": "ac08828d6c148ee375e99e320992186c61bb21375c68a70ce9dfecd7abd70222",
+      "binSize": 30650864,
+      "buildTag": "darwin && amd64"
+    },
+    {
+      "goos": "linux",
+      "goarch": "amd64",
+      "goarm": "",
+      "asset": "mihomo-linux-amd64.gz",
+      "upstream": "mihomo-linux-amd64-v1.19.13.gz",
+      "upstreamSha256": "c85a912c1374c88f602df6b5d8a9b7ce0771828fb66e5bd0bca9179518db90d8",
+      "upstreamSize": 11938067,
+      "binSha256": "82cc0376e5ea7d10c28102134b5b75f165b58398cb1dc88c367caad52efc4336",
+      "binSize": 32043156,
+      "buildTag": "linux && amd64"
+    },
+    {
+      "goos": "linux",
+      "goarch": "arm64",
+      "goarm": "",
+      "asset": "mihomo-linux-arm64.gz",
+      "upstream": "mihomo-linux-arm64-v1.19.13.gz",
+      "upstreamSha256": "7aa8651738202741467d83b9ce51638ab7f01eef352472d2fba17e71dd5cce9a",
+      "upstreamSize": 10836110,
+      "binSha256": "9b4fa20a9526df83370b960d201896fd93c4c3b135cb9e86d60db1989e5f41f3",
+      "binSize": 30015636,
+      "buildTag": "linux && arm64"
+    },
+    {
+      "goos": "linux",
+      "goarch": "arm",
+      "goarm": "7",
+      "asset": "mihomo-linux-arm7.gz",
+      "upstream": "mihomo-linux-armv7-v1.19.13.gz",
+      "upstreamSha256": "3980c63e1c9c4ff6f166f659c48b07cb5ea7c7679c04bc7cbb6392cea105fd97",
+      "upstreamSize": 11209906,
+      "binSha256": "e08dbcf847e8a78b4e368ac4b2f606b3667ac68e0d11a675c072108c04488d6a",
+      "binSize": 29819028,
+      "buildTag": "linux && arm && arm.7"
+    },
+    {
+      "goos": "linux",
+      "goarch": "386",
+      "goarm": "",
+      "asset": "mihomo-linux-386.gz",
+      "upstream": "mihomo-linux-386-v1.19.13.gz",
+      "upstreamSha256": "666da940b947f7b8f9262e5fa729b2f83517a8f2baf7f31e2a6e6ba63418b31e",
+      "upstreamSize": 11360077,
+      "binSha256": "619fe119c7ec13e8e20124b1e60c0e1d41a6d659d410e17d2e88afc2e41f1147",
+      "binSize": 29986964,
+      "buildTag": "linux && 386"
+    },
+    {
+      "goos": "windows",
+      "goarch": "amd64",
+      "goarm": "",
+      "asset": "mihomo-windows-amd64.gz",
+      "upstream": "mihomo-windows-amd64-v1.19.13.zip",
+      "upstreamSha256": "887b8ef56f12901cea447975ca2738dbb9c10b776761db4e2712848c2b93496a",
+      "upstreamSize": 11540554,
+      "binSha256": "6fb45b44d949ceddda6ea9bc22a3febfa42cccf2e190ebbe6ef25809ea5f9318",
+      "binSize": 30963200,
+      "buildTag": "windows && amd64"
+    },
+    {
+      "goos": "windows",
+      "goarch": "arm64",
+      "goarm": "",
+      "asset": "mihomo-windows-arm64.gz",
+      "upstream": "mihomo-windows-arm64-v1.19.13.zip",
+      "upstreamSha256": "bc9be224bfe4b2ab8646301a38696353816b4964dd069529b74e95ae46f0a490",
+      "upstreamSize": 10260949,
+      "binSha256": "6b69669eb4210f6d77f7fb9a3f5d037a237a8746a0d48496143b8035c642bcc2",
+      "binSize": 28395008,
+      "buildTag": "windows && arm64"
+    }
+  ]
+}

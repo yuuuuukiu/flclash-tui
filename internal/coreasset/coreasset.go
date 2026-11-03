@@ -1,8 +1,14 @@
 // Package coreasset 把 mihomo 内核二进制打包进可执行文件，并在首次运行时释放到数据目录。
 //
-// 每个平台一个 asset_<os>_<arch>.go 文件（含 //go:build 约束），各自 go:embed
-// 一份 gzip 压缩的 mihomo 二进制。未打包的平台 compressed 为空，Available() 返回 false，
-// 调用方应回退到系统 PATH 中的 mihomo。
+// 内核二进制不进 git 仓库（每个约 11MB × 8 平台 = 85MB，每次升级都会在历史里留一份）。
+// 改为构建期从 assets.lock.json 拉取：
+//
+//	go generate ./internal/coreasset   # 或 make core-assets
+//
+// gen.py 会按 lock 文件里的 sha256 下载/校验各平台的内核，生成 assets/*.gz 与
+// asset_<os>_<arch>.go（后者只含 //go:embed 与校验值）。assets/ 已被 .gitignore 忽略。
+//
+// 未打包的平台 compressed 为空，Available() 返回 false，调用方回退到 PATH 里的 mihomo。
 package coreasset
 
 import (
@@ -18,7 +24,7 @@ import (
 	"runtime"
 )
 
-// Version 是打包进二进制内的 mihomo 版本。
+// Version 是打包进二进制内的 mihomo 版本（与 assets.lock.json 保持一致）。
 const Version = "v1.19.13"
 
 // ErrUnavailable 表示当前构建平台没有内置内核。
@@ -38,7 +44,7 @@ type Info struct {
 	Platform  string
 	Version   string
 	Available bool
-	Size      int64 // 解压后大小（内置时有效，未知为 0）
+	Size      int64 // 解压后大小
 	SHA256    string
 }
 

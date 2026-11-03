@@ -15,7 +15,7 @@ func TestInfoMatchesBuild(t *testing.T) {
 		t.Fatalf("Version = %q, 期望 %q", info.Version, Version)
 	}
 	if !info.Available {
-		t.Skipf("当前平台 %s 未内置内核，跳过释放测试", info.Platform)
+		t.Skipf("当前平台 %s 未内置内核（先跑 python3 internal/coreasset/gen.py）", info.Platform)
 	}
 	if len(info.SHA256) != 64 {
 		t.Fatalf("sha256 长度异常: %q", info.SHA256)
@@ -31,7 +31,7 @@ func TestInfoMatchesBuild(t *testing.T) {
 
 func TestEnsureExtractsAndIsIdempotent(t *testing.T) {
 	if !Available() {
-		t.Skip("当前平台未内置内核")
+		t.Skip("当前平台未内置内核（先跑 python3 internal/coreasset/gen.py）")
 	}
 	dest := filepath.Join(t.TempDir(), "bin", "mihomo")
 
@@ -73,7 +73,7 @@ func TestEnsureExtractsAndIsIdempotent(t *testing.T) {
 
 func TestEnsureRepairsCorruptedFile(t *testing.T) {
 	if !Available() {
-		t.Skip("当前平台未内置内核")
+		t.Skip("当前平台未内置内核（先跑 python3 internal/coreasset/gen.py）")
 	}
 	dest := filepath.Join(t.TempDir(), "mihomo")
 	if err := os.WriteFile(dest, []byte("not a binary"), 0o755); err != nil {

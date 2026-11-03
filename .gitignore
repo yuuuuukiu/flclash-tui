@@ -3,6 +3,12 @@
 /flclash-tui.exe
 /flclash-tui-*
 
+# 内置内核资产：不进仓库，构建前用 gen.py 拉取
+# （lock 文件 assets.lock.json 要提交，它固定了每个平台的 sha256）
+/internal/coreasset/assets/
+/internal/coreasset/asset_*.go
+!/internal/coreasset/asset_unsupported.go
+
 # 测试产物
 __pycache__/
 *.pyc
