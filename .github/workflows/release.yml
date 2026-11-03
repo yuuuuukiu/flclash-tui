@@ -148,13 +148,39 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
+          # GitHub API 偶尔会返回 5xx，用带退避的重试包一层
+          retry() {
+            n=0
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "重试 5 次仍失败：$*"
+                return 1
+              fi
+              echo "第 $n 次失败，$((n*5))s 后重试：$*"
+              sleep $((n*5))
+            done
+          }
+
           NOTES=$'- mihomo 内核已内置，下载即用，无需另外安装内核\n- 校验：`sha256sum -c checksums.txt`'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/* --clobber
+
+          # 用 gh api 直接查是否已存在（不依赖 gh release view 的隐式行为）
+          if retry gh api "repos/$REPO/releases/tags/$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在，覆盖上传产物"
+            retry gh release upload "$TAG" dist/* --clobber
           else
-            # --generate-notes 与 --notes 互斥，不能同时给
-            gh release create "$TAG" dist/* \
+            echo "创建 Release $TAG"
+            retry gh release create "$TAG" dist/* \
               --title "$TAG" \
               --notes "$NOTES"
           fi
+
+      - name: 汇总
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          gh release view "$TAG" 2>/dev/null || echo "（Release 尚未创建）"
