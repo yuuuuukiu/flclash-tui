@@ -1,0 +1,2 @@
+# 内置内核资产按二进制处理，避免 Git 尝试 diff/换行转换
+internal/coreasset/assets/* binary

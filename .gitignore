@@ -1,0 +1,11 @@
+# 构建产物
+/flclash-tui
+/flclash-tui.exe
+/flclash-tui-*
+
+# 测试产物
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
